@@ -46,7 +46,7 @@ def get_classic_cards():
         classic_cards.append((number, card_name, set_name))
     return classic_cards
 
-def get_values_from_db():
+def get_values_from_db(region):
     with open('sql_login.json', 'r') as config_file:
         config = json.load(config_file)
 
@@ -63,6 +63,10 @@ def get_values_from_db():
     query = '''SELECT * FROM listings WHERE region = 'US' AND valuation >= 30 AND grade = 'Ungraded' AND auction_type = 'Buy it now' AND price_diff_percent > 80 AND price_diff_percent < 600
             AND title NOT LIKE '%HP%' AND title NOT LIKE '%DMG%'
             '''
+    if region == 'UK':
+        query = '''SELECT * FROM listings WHERE region = 'UK' AND valuation >= 30 AND grade = 'Ungraded' AND auction_type = 'Buy it now' AND price_diff_percent > 80 AND price_diff_percent < 600
+                AND title NOT LIKE '%HP%' AND title NOT LIKE '%DMG%'
+                '''
 
     # Execute the query with parameters
     cursor.execute(query)
@@ -95,6 +99,7 @@ def get_values_from_db():
         skip = False
         for word in banned_words:
             if word in title.lower(): skip = True
+        if "ITA" in title: continue
         if skip: continue
         if 'booster' in identified_as.lower(): continue
         if 'elite' in identified_as.lower(): continue
@@ -125,7 +130,7 @@ def get_values_from_db():
     print(len(listings))
     return listings
 
-def make_post(listing):
+def make_post(listing, region):
     download_image(listing.image.replace("140", "1600"), 'temp_image.jpg')
     f = open('temp_image.jpg', 'rb')
     image_data = f.read()
@@ -136,24 +141,36 @@ def make_post(listing):
     listing.link += '?campid=5339084796&toolid=10001&mkevt=1'
     identified_as = listing.identified_as
     percent_off = (100 - (listing.price * 100 / listing.valuation))
+    currency_sign = '$'
+    usd_gbp = 0.74
+    if region == 'UK':
+        currency_sign = '£'
+        listing.price *= usd_gbp
+        listing.valuation *= usd_gbp
+    listing.price = round(listing.price, 2)
+    listing.valuation = round(listing.valuation, 2)
     PC_url = 'https://www.pricecharting.com/game/pokemon-' + set_name.replace(" ","-").lower() + "/" + identified_as.replace(" ", "-").replace("#", "").lower()
     text_builder = client_utils.TextBuilder()
     text_builder.text(set_name + " " + identified_as + " deal\n")
-    text_builder.text("Listed for $" + str(listing.price) + " (Valued at $" + str(listing.valuation) + ")\n")
+    text_builder.text(f"Listed for " + currency_sign + str(listing.price) + f" (Valued at " + currency_sign + str(listing.valuation) + ")\n")
     text_builder.text("Ebay: ")
-    text_builder.link(set_name + " " + listing.identified_as, listing.link)
+    text_builder.link(listing.title[:80], listing.link)
     text_builder.text("\nValue info: ")
     text_builder.link("Pricecharting", PC_url)
     text_builder.text("\n" + str(int(percent_off)) + "% off! #PokemonTCG #DealFinder #TCGdeals\n")
     text_builder.link("More deals at Jimmy's TCG Deal Finder", 'https://www.jimmyrustles.com/pokemondeals')
     post_text = text_builder
-    print(post_text)
-    f = open('bluesky_password.txt','r',encoding='utf-8')
+    print("len:", len(str(post_text)))
+    file = 'bluesky_password.txt'
+    if region == 'UK': file = 'bluesky_password_uk.txt'
+    f = open(file, 'r',encoding='utf-8')
     lines = f.readlines()
     f.close()
     bsky_password = lines[0].replace("\n","")
     client = Client()
-    client.login('PokemonDealsBot.bsky.social', bsky_password)
+    username = 'PokemonDealsBot.bsky.social'
+    if region == 'UK': username = 'PokemonDealsBotUK.bsky.social'
+    client.login(username, bsky_password)
     client.send_image(text=post_text, image=image_data, image_alt=listing.set_name + " " + listing.identified_as)
     f = open('already_posted.txt','a')
     f.write(orig_link + "\n")
@@ -184,9 +201,14 @@ def download_image(url, filename):
 
 def main():
     while True:
-        listings = get_values_from_db()
+        print("Making UK Post")
+        listings = get_values_from_db('UK')
         listing = get_card_to_post(listings)
-        make_post(listing)
+        make_post(listing, 'UK')
+        print("Making US Post")
+        listings = get_values_from_db('US')
+        listing = get_card_to_post(listings)
+        make_post(listing, 'US')
         print("Sleeping for an hour")
         time.sleep(60 * 60)
 
